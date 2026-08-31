@@ -101,3 +101,64 @@ def test_radix_sort_raises_on_non_int():
 
     with pytest.raises(TypeError):
         radix_sort(FloatProblem())
+
+
+@pytest.mark.parametrize("algorithm", ALGORITHMS, ids=lambda f: f.__name__)
+@pytest.mark.parametrize("dataset", DATASETS, ids=lambda d: type(d).__name__)
+def test_on_step_is_noop_when_omitted(algorithm, dataset):
+    # on_step defaults to None and must not change the sorted result or the
+    # existing statistics=True counters, across every algorithm and dataset.
+    # (Deliberately not comparing full stats dicts - 'time' is wall-clock and
+    # will never match across two independent calls, on_step or not.)
+    result_default = algorithm(dataset)
+    result_explicit_none = algorithm(dataset, on_step=None)
+    assert result_default == result_explicit_none == sorted(dataset.data())
+    _, stats_a = algorithm(dataset, statistics=True)
+    _, stats_b = algorithm(dataset, statistics=True, on_step=None)
+    assert stats_a['comparisons'] == stats_b['comparisons']
+    assert stats_a['swaps'] == stats_b['swaps']
+
+
+def test_bubble_sort_on_step_counts_match_statistics():
+    dataset = RandomIntegers(size=30, seed=7)
+    events = []
+    result, stats = bubble_sort(dataset, statistics=True, on_step=events.append)
+    assert result == sorted(dataset.data())
+    compare_events = [e for e in events if e['type'] == 'compare']
+    swap_events = [e for e in events if e['type'] == 'swap']
+    assert len(compare_events) == stats['comparisons']
+    assert len(swap_events) == stats['swaps']
+    # Running counts on the last event of each kind should match the final totals.
+    assert compare_events[-1]['comparisons'] == stats['comparisons']
+    assert swap_events[-1]['swaps'] == stats['swaps']
+
+
+def test_insertion_sort_on_step_write_count_matches_statistics():
+    # insertion_sort is a Bucket B (shift/write, not swap) algorithm - confirm the
+    # 'write' vocabulary is used instead of 'swap', and that shift-writes are
+    # exactly the reported swap count (the final placement write is one extra,
+    # non-counted write per outer iteration).
+    dataset = NearlySorted(size=30, swaps=8, seed=3)
+    events = []
+    result, stats = insertion_sort(dataset, statistics=True, on_step=events.append)
+    assert result == sorted(dataset.data())
+    assert all(e['type'] != 'swap' for e in events)
+    shift_writes = [e for e in events if e['type'] == 'write' and e['source'] is not None]
+    assert len(shift_writes) == stats['swaps']
+
+
+def test_counting_sort_on_step_never_emits_compare():
+    dataset = RandomIntegers(size=30, seed=11)
+    events = []
+    counting_sort(dataset, on_step=events.append)
+    assert all(e['type'] != 'compare' for e in events)
+    assert any(e['type'] == 'write' for e in events)
+
+
+def test_radix_sort_on_step_emits_digit_pass_marks():
+    dataset = RandomIntegers(size=30, seed=11)
+    events = []
+    radix_sort(dataset, on_step=events.append)
+    digit_pass_marks = [e for e in events if e['type'] == 'mark' and e['kind'] == 'digit-pass']
+    assert len(digit_pass_marks) > 0
+    assert all(e['phase'] == 'non_negatives' for e in digit_pass_marks)  # no dataset produces negatives
