@@ -1,5 +1,6 @@
 import time
 from polysort.interfaces import SortProblem
+from ._noncomparison import assert_comparator_is_ascending
 
 
 def radix_sort(problem: SortProblem, statistics=False, on_step=None):
@@ -80,6 +81,11 @@ def radix_sort(problem: SortProblem, statistics=False, on_step=None):
                 exp *= 10
 
         data[:] = negatives + non_negatives
+
+    # Refuses a comparator this algorithm cannot honor, rather than returning a
+    # correctly-ascending list as the answer to a different question. Not counted
+    # toward `comparisons`: this validates the result, it is not part of the sort.
+    assert_comparator_is_ascending(problem, data, "radix_sort")
 
     elapsed = time.time() - start_time
     if statistics:

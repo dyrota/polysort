@@ -162,3 +162,97 @@ def test_radix_sort_on_step_emits_digit_pass_marks():
     digit_pass_marks = [e for e in events if e['type'] == 'mark' and e['kind'] == 'digit-pass']
     assert len(digit_pass_marks) > 0
     assert all(e['phase'] == 'non_negatives' for e in digit_pass_marks)  # no dataset produces negatives
+
+
+# --- non-comparison sorts must not silently ignore the comparator -----------
+
+from polysort.interfaces import SortProblem
+
+NON_COMPARISON = [counting_sort, radix_sort]
+COMPARISON = [bubble_sort, selection_sort, insertion_sort, merge_sort,
+              quick_sort, heap_sort, shell_sort, tim_sort]
+
+
+class _DescendingProblem(SortProblem):
+    def __init__(self, values=(5, 3, 8, 1, 9, 2)):
+        self._values = list(values)
+
+    def data(self):
+        return list(self._values)
+
+    def comparator(self, a, b):
+        return (a < b) - (a > b)
+
+
+class _AscendingProblem(SortProblem):
+    def __init__(self, values=(5, 3, 8, 1, 9, 2)):
+        self._values = list(values)
+
+    def data(self):
+        return list(self._values)
+
+    def comparator(self, a, b):
+        return (a > b) - (a < b)
+
+
+@pytest.mark.parametrize("algorithm", NON_COMPARISON)
+def test_non_comparison_sort_refuses_a_comparator_it_cannot_honor(algorithm):
+    # These order by value and never consult comparator(), so a descending
+    # comparator previously produced a correctly-ASCENDING list -- the right
+    # answer to a question nobody asked, with nothing to signal it.
+    with pytest.raises(TypeError) as excinfo:
+        algorithm(_DescendingProblem())
+    assert "non-comparison" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("algorithm", NON_COMPARISON)
+def test_non_comparison_sort_error_points_at_a_usable_alternative(algorithm):
+    with pytest.raises(TypeError) as excinfo:
+        algorithm(_DescendingProblem())
+    assert "merge_sort" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("algorithm", NON_COMPARISON)
+def test_non_comparison_sort_still_accepts_an_ascending_comparator(algorithm):
+    assert algorithm(_AscendingProblem()) == [1, 2, 3, 5, 8, 9]
+
+
+@pytest.mark.parametrize("algorithm", NON_COMPARISON)
+def test_non_comparison_validation_does_not_inflate_comparisons(algorithm):
+    # Counting sort performing zero comparisons WHILE SORTING is the point of
+    # it; the guard checks the result afterwards and must not be counted.
+    _, stats = algorithm(_AscendingProblem(), statistics=True)
+    assert stats["comparisons"] == 0
+
+
+@pytest.mark.parametrize("algorithm", COMPARISON)
+def test_comparison_sorts_do_honor_a_descending_comparator(algorithm):
+    # The other eight are comparison-based and must genuinely sort descending.
+    assert algorithm(_DescendingProblem()) == [9, 8, 5, 3, 2, 1]
+
+
+# --- documented stability must match actual behavior ------------------------
+
+# Comparator inspects only the first element, so a stable sort has to preserve
+# the original order of the tags among equal keys.
+_STABILITY_PAIRS = [(3, "a"), (1, "b"), (3, "c"), (1, "d"), (2, "e"), (3, "f"), (1, "g"), (2, "h")]
+
+
+class _PairProblem(SortProblem):
+    def data(self):
+        return list(_STABILITY_PAIRS)
+
+    def comparator(self, a, b):
+        return (a[0] > b[0]) - (a[0] < b[0])
+
+
+@pytest.mark.parametrize("algorithm", COMPARISON)
+def test_stability_matches_the_documented_claim(algorithm):
+    claims_stable = "Stable: Yes" in (algorithm.__doc__ or "")
+    result = algorithm(_PairProblem())
+    # Python's own sort is stable, so this is the reference ordering.
+    is_stable = result == sorted(_STABILITY_PAIRS, key=lambda pair: pair[0])
+    assert is_stable == claims_stable, (
+        f"{algorithm.__name__} documents 'Stable: {'Yes' if claims_stable else 'No'}' "
+        f"but behaves {'stably' if is_stable else 'unstably'}"
+    )
