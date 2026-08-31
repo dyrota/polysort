@@ -1,8 +1,9 @@
 import time
 from polysort.interfaces import SortProblem
+from ._noncomparison import assert_comparator_is_ascending
 
 
-def counting_sort(problem: SortProblem, statistics=False):
+def counting_sort(problem: SortProblem, statistics=False, on_step=None):
     """
     Counting Sort — a non-comparison integer sorting algorithm. Counts the
     occurrences of each value, then reconstructs the sorted list from those
@@ -14,6 +15,11 @@ def counting_sort(problem: SortProblem, statistics=False):
     Space complexity: O(k)
 
     Note: Only works with integer data. Raises TypeError for non-integer inputs.
+
+    :param on_step: Optional callback invoked with a dict for each write event, for live
+                    tracing or visualization. Default is none (no-op). No 'compare' events are
+                    ever emitted - this algorithm is legitimately non-comparison based, and
+                    'comparisons' correctly stays 0 throughout.
     """
     data = problem.data().copy()
     comparisons = 0
@@ -31,12 +37,21 @@ def counting_sort(problem: SortProblem, statistics=False):
 
         for val in data:
             count[val - min_val] += 1
+            if on_step:
+                on_step({'type': 'write', 'target': {'buffer': 'count', 'index': val - min_val}, 'value': count[val - min_val], 'source': None, 'comparisons': comparisons, 'swaps': swaps})
 
         idx = 0
         for i, c in enumerate(count):
             for _ in range(c):
                 data[idx] = i + min_val
+                if on_step:
+                    on_step({'type': 'write', 'target': {'buffer': 'main', 'index': idx}, 'value': i + min_val, 'source': None, 'comparisons': comparisons, 'swaps': swaps})
                 idx += 1
+
+    # Refuses a comparator this algorithm cannot honor, rather than returning a
+    # correctly-ascending list as the answer to a different question. Not counted
+    # toward `comparisons`: this validates the result, it is not part of the sort.
+    assert_comparator_is_ascending(problem, data, "counting_sort")
 
     elapsed = time.time() - start_time
     if statistics:
